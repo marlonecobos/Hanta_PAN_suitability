@@ -1,8 +1,8 @@
-## Sampling zoonotic pathogens, and hantavirus dynamics in Panama
+## Strategic surveillance of zoonotic pathogens
 
 <hr>
 
-This repository serves to store R scripts to reproduce analyses presented in the manuscript "Selecting sites for strategic surveillance of zoonotic pathogens: a case study in Panamá".
+This repository serves to store R scripts and data to reproduce analyses presented in the manuscript "Selecting sites for strategic surveillance of zoonotic pathogens: a case study in Panamá". Part of the data used in analyses can be downloaded following instructions in the script and using the code provided.
 
 Contact: manubio13@gmail.com
 
