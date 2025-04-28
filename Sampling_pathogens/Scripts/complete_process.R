@@ -1,7 +1,7 @@
 ################################################################################
 # Project: Strategic surveillance of zoonotic pathogens
 # Author: Marlon E. Cobos
-# Date: 10/07/2024 (dd/mm/yyyy)
+# Date: 27/04/2025 (dd/mm/yyyy)
 ################################################################################
 
 
@@ -102,7 +102,7 @@ rec <- read.csv("Data/records/Panama orthohanta positives_11 oct 2023.csv")
 # Data preparation -------------------------------------------------------------
 # project layers
 roads2 <- project(roads2, pan)
-  
+
 # mask layers
 ## variables to PAN
 varsp <- crop(vars, pan, mask = TRUE)
@@ -147,9 +147,27 @@ points(recr[, c("DEC_LONG", "DEC_LAT")], pch = 3,
 denl <- varsp$bio1
 denl <- (denl < 1000) * 1
 
+## raster cell id for all points to avoid cell duplicates to be considered
+## raster cells are localities
+cellid <- extract(denl, recr[, c("DEC_LONG", "DEC_LAT")], 
+                  cells = TRUE, xy = TRUE)
+recr <- cbind(recr, cellid[, c("x", "y")])
+cellid <- cellid$cell
+
+## number of independent sampling years per pixel
+### unique sampling years per locality
+years <- gsub(".*/(\\d{4})", "\\1", recr$BEGAN_DATE)
+syears <- recr[!duplicated(paste(years, cellid)), ]
+
+### calculations using a raster layer as a base for counting
+syv <- vect(syears, geom = c("x", "y"), crs = crs(varsp))
+denlsy <- rasterize(syv, denl, fun = function(i) {length(i)}, background = NA)
+syears_loc <- as.data.frame(denlsy, xy = TRUE, cells = TRUE)
+
+
 ## number of independent sampling days per pixel
 ### unique sampling days per locality
-sdays <- recr[!duplicated(paste(recr$BEGAN_DATE, recr$DEC_LONG, recr$DEC_LAT)), ]
+sdays <- recr[!duplicated(paste(recr$BEGAN_DATE, cellid)), ]
 
 ### calculations using a raster layer as a base for counting
 sdv <- vect(sdays, geom = c("DEC_LONG", "DEC_LAT"), crs = crs(vars))
@@ -158,16 +176,16 @@ sdays_loc <- as.data.frame(denlsd, xy = TRUE, cells = TRUE)
 
 ## number of species per pixel
 ### unique species names per locality
-sploc <- recr[!duplicated(paste(recr$SCIENTIFIC_NAME, recr$DEC_LONG, 
-                                recr$DEC_LAT)), ]
+sploc <- recr[!duplicated(paste(recr$SCIENTIFIC_NAME, cellid)), ]
 
 ### calculations using a raster layer as a base for counting
 splv <- vect(sploc, geom = c("DEC_LONG", "DEC_LAT"), crs = crs(vars))
 denlspl <- rasterize(splv, denl, fun = function(i) {length(i)}, background = NA)
 denlspl <- rasterize(splv, denl, field = "SCIENTIFIC_NAME", 
                      fun = function(i) {length(unique(i))},
-                      background = NA)
+                     background = NA)
 spl_loc <- as.data.frame(denlspl, xy = TRUE, cells = TRUE)
+colnames(spl_loc)[4] <- "V1" 
 
 ## number of samples per pixel
 ### counting number of records (samples) using a raster layer as a base
@@ -178,15 +196,12 @@ rec_loc <- as.data.frame(denlr, xy = TRUE, cells = TRUE)
 ## hantavirus prevalence per pixel
 ### calculation of prevalences based on Arctos data
 recrp <- recr
-recrp$LOC <- paste(recr$DEC_LONG, recr$DEC_LAT)
 recrp$TEST <- ifelse(recrp$DETECTED == "virus: Orthohantavirus", 1, 0)
 
-recrp <- as.matrix(table(recrp$LOC, recrp$TEST))
+recrp <- as.matrix(table(cellid, recrp$TEST))
 
 ### prepare data for computation in a raster layer
-prevxy <- do.call(rbind, strsplit(rownames(recrp), " "))
-
-recrpre <- data.frame(x = as.numeric(prevxy[, 1]), y = as.numeric(prevxy[, 2]), 
+recrpre <- data.frame(xyFromCell(denl, as.numeric(rownames(recrp))), 
                       negative = recrp[, 1], positive = recrp[, 2], 
                       prevalence = recrp[, 2] / (recrp[, 1] + recrp[, 2]), 
                       row.names = NULL)
@@ -201,7 +216,14 @@ prev_loc$meanr <- round(prev_loc$mean, 2)
 
 # plot represent localities according to numbers
 x11()
-par(mfrow = c(4, 1), cex = 0.8)
+par(mfrow = c(3, 2), cex = 0.8)
+
+plot(pan, col = "gray85", main = "Number of years sampled per locality")
+points(syears_loc[syears_loc$V1 >= 2, 2:3])
+points(syears_loc[syears_loc$V1 >= 4, 2:3], col = "red", pch = 19)
+points(syears_loc[syears_loc$V1 >= 3, 2:3], pch = 3)
+legend(-83, 8, legend = c(">2", ">3", ">4"), pch = c(1, 3, 19), 
+       col = c(1, 1, 2), bty = "n", cex = 0.8)
 
 plot(pan, col = "gray85", main = "Number of sampling days per locality")
 points(sdays_loc[sdays_loc$V1 >= 5, 2:3])
@@ -234,6 +256,7 @@ legend(-83, 8, legend = c(">0.10", ">0.20", ">0.50"), pch = c(1, 3, 19),
 ## save results
 dir.create("Results")
 
+write.csv(syears_loc, "Results/nyears_per_locality.csv", row.names = FALSE)
 write.csv(sdays_loc, "Results/ndays_per_locality.csv", row.names = FALSE)
 write.csv(spl_loc, "Results/nspp_per_locality.csv", row.names = FALSE)
 write.csv(rec_loc, "Results/samples_per_locality.csv", row.names = FALSE)
@@ -294,9 +317,9 @@ lola <- c("Longitude", "Latitude")
 rec_loce_pc <- extract(varsr2pc, rec_loc[, 2:3])[, 2:3]
 
 ## put information together
-rec_loce_pc1 <- cbind(rec_loc[, 1:3], rec_loce_pc, days = sdays_loc$V1, 
-                      species = spl_loc$SCIENTIFIC_NAME, samples = rec_loc$V1,
-                      prev = prev_loc$mean)
+rec_loce_pc1 <- cbind(rec_loc[, 1:3], rec_loce_pc, years = syears_loc$V1,
+                      days = sdays_loc$V1, species = spl_loc$V1, 
+                      samples = rec_loc$V1, prev = prev_loc$mean)
 
 ## save in file
 write.csv(rec_loce_pc1, "Results/summary_per_locality.csv", row.names = FALSE)
@@ -381,10 +404,10 @@ points(rec_loce_pc1[rec_loce_pc1$cell %in% selected, pcs], pch = 16,
 # places selected to complete environmental coverage
 ## check points in certain environmental ranges
 rec_loce_pc1[rec_loce_pc1$PC1 > 2 & rec_loce_pc1$PC1 < 3.5 &
-              rec_loce_pc1$PC2 > -3 & rec_loce_pc1$PC2 < -2, ]
+               rec_loce_pc1$PC2 > -3 & rec_loce_pc1$PC2 < -2, ]
 
 rec_loce_pc1[rec_loce_pc1$PC1 > -1 & rec_loce_pc1$PC1 < 1 &
-              rec_loce_pc1$PC2 > 3 & rec_loce_pc1$PC2 < 4, ]
+               rec_loce_pc1$PC2 > 3 & rec_loce_pc1$PC2 < 4, ]
 
 rec_loce_pc1[rec_loce_pc1$PC1 > -1 & rec_loce_pc1$PC1 < 1 &
                rec_loce_pc1$PC2 > 3 & rec_loce_pc1$PC2 < 4, ]
